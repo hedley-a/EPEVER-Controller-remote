@@ -1,0 +1,302 @@
+ /*
+ *  EPever MPPT Charge controller RS485 Interface
+ *  Design brief:
+ *   Use: Scottish Bothy with multiple occupants. Operation must be simple:  
+ *      * 'Press Here' > 'Lights ON'  Press Again > 'Lights OFF'
+ *      * Remote Load ON/OFF switching to eliminate trip in dark to Epever controller
+ *       
+ *   Lights have been left on for weeks battening the flattery:
+ *        Daily Load OFF timed by EPever RTC - IF ON > OFF at Midday 12:00hrs
+ *  
+ *   Power consumption: <1mA@12Volts
+ *    
+ *  Big thankyou to Colin Hickey for permission to adapt his code
+ *  https://github.com/chickey/RS485-WiFi-EPEver
+ *  And also:
+ *  https://github.com/glitterkitty/EpEverSolarMonitor 
+ *
+ *  Hardware:
+ *    Development arduino nano  
+ *    Production 5 Volt pro mini
+ *    MAX485CSA Converter module
+ *    
+ *
+ *    Remote switching  - Wired or Wireless using cheap doorbell 
+ */
+
+////////////////
+//#define DEBUG true
+#define DEBUG false
+
+////////////////
+ 
+ #include <ModbusMaster.h>
+ #include <LowPower.h>
+ #include <EnableInterrupt.h>
+ #include "config.h"
+
+// instantiate ModbusMaster object
+ModbusMaster node;
+
+#include <AltSoftSerial.h> 
+//https://www.pjrc.com/teensy/td_libs_AltSoftSerial.html
+
+
+void setup(){
+  
+// Modbus at 115200 baud
+Serial.begin(115200);
+while (!Serial){;}
+
+// init modbus in receive mode
+pinMode(MAX485_RE, OUTPUT);
+pinMode(MAX485_DE, OUTPUT);
+
+pinMode(wakePin,INPUT_PULLUP); //INT 0:
+enableInterrupt(wakePin, isr_handler, FALLING);
+
+// Init in receive mode
+digitalWrite(MAX485_RE, 0);
+digitalWrite(MAX485_DE, 0);
+
+
+// EPEver Device ID 1
+node.begin(1, Serial);
+
+// Callbacks
+node.preTransmission(preTransmission);
+node.postTransmission(postTransmission);
+}
+
+void preTransmission(){
+  digitalWrite(MAX485_RE, 1);
+  digitalWrite(MAX485_DE, 1);
+}
+
+void postTransmission(){
+  digitalWrite(MAX485_RE, 0);
+  digitalWrite(MAX485_DE, 0);
+}
+//------------------------------------------------------------
+void read_time() {
+  
+  // clear old data
+  memset(rtc.buf,0,sizeof(rtc.buf));
+  // Read registers for clock
+  //
+  delay(50);
+  node.clearResponseBuffer();
+  uint8_t result = node.readHoldingRegisters(RTC_CLOCK, RTC_CLOCK_CNT);
+  if (result == node.ku8MBSuccess)  {
+
+    rtc.buf[0]  = node.getResponseBuffer(0);
+    rtc.buf[1]  = node.getResponseBuffer(1);
+    rtc.buf[2]  = node.getResponseBuffer(2);
+    
+  } else {
+#ifdef DEBUG
+    Serial.print(F("Miss read rtc-data, ret val:"));
+    Serial.println(result, HEX);
+#endif
+  }
+delay(50);
+}
+
+void read_livedata() {
+  // clear old data
+  memset(live.buf,0,sizeof(live.buf));
+  delay(50);
+  node.clearResponseBuffer();
+  result = node.readInputRegisters(LIVE_DATA, LIVE_DATA_CNT);
+  if (result == node.ku8MBSuccess)  {
+
+    for(i=0; i< LIVE_DATA_CNT ;i++) live.buf[i] = node.getResponseBuffer(i);
+       
+  } else {
+    Serial.print("Miss read liva-data, ret val:");
+    Serial.println(result, HEX);
+  }
+delay(50);
+}
+
+ 
+void read_statsdata() {
+  ;
+}
+
+void midday_switch() {
+
+ //Output values to serial
+  // Serial.println("");
+  //  char buffer[30];
+  //  Serial.print("");
+  //  sprintf(buffer,"\n\nTime:  20%02d-%02d-%02d   %02d:%02d:%02d   \n",  rtc.r.y , rtc.r.M , rtc.r.d , rtc.r.h , rtc.r.m , rtc.r.s  );
+  //  Serial.print (buffer);
+  
+  if ((rtc.r.h >=12)&&(rtc.r.h <=13)){
+    init_off = true;
+ //   Serial.println("StageOne");
+  }
+  if ((rtc.r.m >=14)&&(rtc.r.m <= 15)){
+    init_off = false;
+ //   Serial.println("StageTwo");
+  }
+      
+  if ((rtc.r.m >=16)&&(rtc.r.m <= 17)){
+    block_off = false;
+//    Serial.println("StageThree");
+
+  }
+  if ((init_off == true) && (block_off == false)){
+  Serial.println ("turning off");
+  loadState = false;
+  switch_load = true;
+  block_off = true;
+  delay(50); 
+  }
+}
+
+void minute_switch() {
+  
+  if ((rtc.r.s >=00)&&(rtc.r.s <=10)){
+    init_off = true;
+    Serial.println("StageOne");
+  }
+  if ((rtc.r.s >=15)&&(rtc.r.s <= 25)){
+    init_off = false;
+    Serial.println("StageTwo");
+  }
+      
+  if ((rtc.r.s >=30)&&(rtc.r.s <= 40)){
+    block_off = false;
+    Serial.println("StageThree");
+
+  }
+  if ((init_off == true) && (block_off == false)){
+   Serial.println ("turning off");
+  loadState = false;
+  switch_load = true;
+  block_off = true;
+  delay(50); 
+  }
+}
+
+void write_loadstate(){ 
+
+node.writeSingleCoil(0x0002, loadState);
+
+#ifdef DEBUG
+    if (result != node.ku8MBSuccess)  {
+      Serial.print(F("Miss write loadState, ret val:"));
+      Serial.println(result, HEX);
+      Serial.print(F("Switching Load "));
+      Serial.println( (loadState?F("On"):F("Off")) );
+    }
+#endif
+delay(2000); // ensure bell 1500mS interrupts are missed..
+switch_load = false;    //clear flag
+}
+ 
+void read_loadstate(){ 
+ // State of the Load Switch
+
+ delay(50);
+  node.clearResponseBuffer();
+  result = node.readCoils(  LOAD_STATE, 1 );
+  if (result == node.ku8MBSuccess)  {
+    
+    loadState = node.getResponseBuffer(0);
+  } else  {
+#ifdef DEBUG
+    Serial.print("Miss read loadState, ret val:");
+    Serial.println(result, HEX);
+#endif
+ }
+if (result==226)     ErrorCounter++;
+}
+
+void debug_output(){
+#ifdef DEBUG
+    Serial.print("LoadState: ");                
+    Serial.println(loadState);
+    Serial.print("switch_load: ");
+    Serial.println(switch_load);                            
+    Serial.println();
+#endif
+}
+
+/* Interupt from wireless doorbell - 5 pulses period 650mS
+ * 1500 mS of falling edge interupts  - Debounce 1800mS
+----------------------------------------------------------------------
+ */
+void isr_handler(){
+if (!enable_isr)
+return;
+    led_status = !led_status;
+    loadState = !loadState ;
+    digitalWrite(LED_BUILTIN, led_status);
+    switch_load = true;     //set flag to change state
+enable_isr = false;
+} 
+
+// MAIN LOOP
+//-----------------------------------------------------------------------------
+void loop(){
+
+debug_output(); // print data if in debug 
+ 
+Serial.flush();
+
+
+// Sleep mode
+enable_isr = true;
+if (DEBUG){
+  delay(2000);
+}else{
+for(int i=0;(i<30 && !switch_load);i++) {
+    //
+    LowPower.powerDown(SLEEP_2S, ADC_OFF, BOD_OFF);
+   }
+}
+
+// Read Values from Controller
+read_time();
+read_livedata();
+read_statsdata();
+
+if (DEBUG){
+ minute_switch();
+}else{
+ midday_switch(); // switch off at midday - or thereabouts
+   }
+
+if (switch_load = true){
+write_loadstate();
+} 
+read_loadstate();
+
+//Check error count and if it exceeds 5 reset modbus
+//#ifdef DEBUG
+//  Serial.print("Error count");
+//  Serial.println(ErrorCounter);
+//#endif
+
+  if (ErrorCounter>5) {
+    // init modbus in receive mode
+    pinMode(MAX485_RE, OUTPUT);
+    pinMode(MAX485_DE, OUTPUT);
+    postTransmission();
+
+    // EPEver Device ID and Baud Rate
+    node.begin(1, Serial);
+    
+    // modbus callbacks
+    node.preTransmission(preTransmission);
+    node.postTransmission(postTransmission);
+    ErrorCounter = 0;  
+  }
+// power down MAX485_DE
+postTransmission();
+
+}
+//--------------------------------------------------------------------------------
