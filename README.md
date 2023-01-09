@@ -1,6 +1,7 @@
 # EPEVER-Controller-remote
-This is a wireless remote to switch on and off a charge controller using MODBUS
-the code has only been tested on an XTRA Series.
+Wireless remote to switch charge controller output using MODBUS
+Also switches daily using EPEVER RTC
+Code has only been tested on an XTRA Series.
 EPever MPPT Charge controller RS485 Interface
  *  Design brief:
  *   Use: Scottish Bothy with multiple occupants. Operation must be simple:  
@@ -20,10 +21,11 @@ EPever MPPT Charge controller RS485 Interface
  *  Hardware:
  *    Development arduino nano  
  *    Production 5 Volt pro mini
- *    MAX485CSA Converter module
- *    
+ *    MAX485CSA Converter module  
  *
- *    Remote switching - Wireless using cheap doorbell 
- */
-![SmallBell](https://user-images.githubusercontent.com/30367667/211413811-706471a0-1aca-4b82-8099-97455eed3312.png)
-![Case Rear](https://user-images.githubusercontent.com/30367667/211413828-17badfa9-ce51-4e05-bc4a-7e9667bd7c03.png)
+ *    Remote switching -  using cheap wireless doorbell 
+ *    
+ 
+ 
+![VerySmallBell](https://user-images.githubusercontent.com/30367667/211414502-df63461b-1d76-4c96-a9c1-698f55d002bc.png)
+![smallCase Rear](https://user-images.githubusercontent.com/30367667/211414531-66b0d02b-7a34-4935-a7f1-2a94e6bc41b9.png)
